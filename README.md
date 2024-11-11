@@ -1,2 +1,2 @@
-# Project-1
-Project 1 for Chem5050
+# Projects-cps
+Repo for projects done in Chem 5050

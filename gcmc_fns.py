@@ -220,21 +220,21 @@ fig, axs = plt.subplot_mosaic([[0, 1, 2], [3, 4, 5]], figsize=(6.5, 4.5))
 # Mean coverage of A
 axs[0].pcolormesh(mus_A, Ts, mean_coverage_A.T, cmap='viridis', vmin=0, vmax=1)
 axs[0].set_title(r'$\langle \theta_A \rangle$')
-axs[0].set_xlabel(r'$\mu_A$')
-axs[0].set_ylabel(r'$T$')
+axs[0].set_xlabel(r'$\mu_A$ (eV)')
+axs[0].set_ylabel(r'T (K)')
 axs[0].set_yticks([Ts[0], Ts[1], Ts[2], Ts[3], Ts[4], Ts[5], Ts[6]])
 axs[0].set_yticklabels([round(Ts[0]/0.0000861733), round(Ts[1]/0.0000861733), round(Ts[2]/0.0000861733), round(Ts[3]/0.0000861733), round(Ts[4]/0.0000861733), round(Ts[5]/0.0000861733), round(Ts[6]/0.0000861733)])
 
 # Mean coverage of B
 axs[1].pcolormesh(mus_A, Ts, mean_coverage_B.T, cmap='viridis', vmin=0, vmax=1)
 axs[1].set_title(r'$\langle \theta_B \rangle$')
-axs[1].set_xlabel(r'$\mu_A$')
+axs[1].set_xlabel(r'$\mu_A$ (eV)')
 axs[1].set_yticks([])
 
 # Mean total coverage
 cax = axs[2].pcolormesh(mus_A, Ts, mean_coverage_A.T + mean_coverage_B.T, cmap='viridis', vmin=0, vmax=1)
 axs[2].set_title(r'$\langle \theta_A + \theta_B \rangle$')
-axs[2].set_xlabel(r'$\mu_A$')
+axs[2].set_xlabel(r'$\mu_A$ (eV)')
 axs[2].set_yticks([])
 fig.colorbar(cax, ax=axs[2], location='right', fraction=0.1)
 

@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-#Simulation Parameters
+#Simulation Parameters, placeholders that can be changed
 k_B = 1.38e-23 #J/K
 dt = 0.01  # Time step
 total_steps = 10000  # Number of steps
@@ -16,197 +16,180 @@ epsilon_repulsive = 1.0  # Depth of repulsive LJ potential
 epsilon_attractive = 0.5  # Depth of attractive LJ potential
 sigma = 1.0  # LJ potential parameter
 cutoff = 2**(1/6) * sigma
-position_trajectory = []
-velocity_trajectory = []
-forces_trajectory = []
-temperature_trajectory = []
+
+np.random.seed(42) #For reproducibility
 
 
-
-#Functions
+# Apply periodic boundary conditions
 def apply_pbc(position, box_size):
-    #Applies periodic boundary conditions
     return position % box_size
 
-
+# Initialize positions
 def initialize_chain(n_particles, box_size, r0):
-    positions = np.zeros((n_particles, 3))
-
-    # Initialize the first position at the center of the box
+    positions = np.zeros((n_particles,3))
     current_position = np.array([box_size/2, box_size/2, box_size/2])
     positions[0] = current_position
-
-    # Iterate to initialize the rest of the positions in a chain
+    
     for i in range(1, n_particles):
-        direction = np.random.randn(3) 
-        direction /= np.linalg.norm(direction)  # Normalize the vector to unit length
-        next_position = current_position + r0 * direction #Move direction from current position
-        positions[i] = apply_pbc(next_position, box_size)
-        current_position = positions[i] #Update current position
-    return positions
+        direction = np.random.randn(3)
+        direction /= np.linalg.norm(direction) # Generate a random unit vector
 
+        # Compute the next position
+        next_position = current_position + r0 * direction
+        positions[i] = apply_pbc(next_position, box_size) # Apply periodic boundary conditions
+        # Update the current position
+        current_position = positions[i]
+    
+    return positions 
+
+# Initialize velocities
 def initialize_velocities(n_particles, target_temperature, mass):
-    velocities = np.random.randn(n_particles, 3) 
-    velocities *= np.sqrt(k_B * target_temperature / mass) #Random velocities put to Maxwell-Boltzmann Dist
-    velocities -= np.mean(velocities, axis=0) #Remove net momentum
-    return velocities
+    std_dev = np.sqrt(k_B * target_temperature / mass) 
+    velocities = np.random.normal(0, std_dev, (n_particles, 3)) # Generate random velocities from a normal distribution
+    velocities -=np.mean(velocities, axis=0)
+    
+    return velocities   
 
+# Apply the minimum image convention to a displacement vector
 def minimum_image(displacement, box_size):
-    #Applies minimum image to account for PBC
-    for i in range(3): #Adjusts displacement if outside box
-        if displacement[i] > box_size / 2: 
-            displacement[i] -= box_size
-        elif displacement[i] < -box_size / 2:
-            displacement[i] += box_size
-    return displacement    
+    return displacement - np.round(displacement / box_size) * box_size
 
+# Compute harmonic forces
 def compute_harmonic_forces(positions, k, r0, box_size):
-    forces = np.zeros_like(positions) #Intialize force array
-    for i in range(0, (n_particles-2)):
-        displacement = positions[i+1] - positions[i]
-        displacement = minimum_image(displacement, box_size) #Apply PBC to displacement vector
-        distance = np.linalg.norm(displacement)
-        force_magnitude = -k * (distance - r0) #Harmonic force magnitude
-        force = force_magnitude * (displacement / distance)
+   
+    forces = np.zeros_like(positions)
+    n_praticles = positions.shape[0]
 
-        #apply forces to both molecules in opposite directions
+    for i in range(n_particles - 1):
+        # Compute the displacement vector
+        displacement = positions[i + 1] - positions[i]
+        displacement = minimum_image(displacement, box_size)
+        distance = np.linalg.norm(displacement) # Compute the distance between the particles
+        
+        # Compute the force magnitude/vector
+        force_magnitude = -k * (distance - r0)
+        force = force_magnitude * (displacement / distance)
+        
+        # Update the forces on the particles
         forces[i] -= force
         forces[i+1] += force
+    
     return forces
 
+# Compute harmonic forces
 def compute_lennard_jones_forces(positions, epsilon, sigma, box_size, interaction_type):
+    n_particles = positions.shape[0]
     forces = np.zeros_like(positions)
-    for i in range(0, (n_particles-1)):
-        for j in range((i+1), (n_particles-1)): #Determines interaction type based on given conditions
-            if interaction_type == 'repulsive' and np.linalg.norm(i-j) == 2:
-                epsilon = float(epsilon_repulsive) #given
-            elif interaction_type == 'attractive' and np.linalg.norm(i-j) > 2:
-                epsilon = float(epsilon_attractive) #given
+    cutoff = 2**(1/6) * sigma # Lennard-Jones cutoff radius
+     
+    for i in range(n_particles):
+        for j in range(i + 1, n_particles): # Determine the appropriate epsilon based on interaction type
+            if interaction_type == 'repulsive' and abs(i - j) == 2:
+                epsilon = epsilon_repulsive
+            elif interaction_type == 'attractive' and abs(i -j) > 2:
+                epsilon = epsilon_attractive
             else:
                 continue
+
+            #Compute the displacement and apply minimum image convention
             displacement = positions[j] - positions[i]
-            displacement = minimum_image(displacement, box_size) #Apply PBC to displacement vector
-            distance = float(np.linalg.norm(displacement))
+            displacemnet = minimum_image(displacement, box_size)
+            distance = np.linalg.norm(displacement)
 
-            if distance < cutoff:
-                lj = (sigma / distance)**12 - (.5 * (sigma / distance)**6)
-                epsilon = float(epsilon)
-                force_magnitude = 24 * epsilon * (lj) / distance
-                force = force_magnitude * (displacement / distance) #Normalize force vector
+            if distance >= cutoff: # Skip if outside the cutoff
+                continue
 
-                #Apply forces to both molecules in opposite directions
-                forces[i] -= force
-                forces[j] += force 
+            #Compute Lennard-Jones force magnitude and vector
+            lj_factor = (sigma / distance)
+            force_magnitude = 24 * epsilon * ((lj_factor**12) - 0.5 * (lj_factor**6)) / distance
+            force = force_magnitude * (displacement / distance)
+
+             # Update forces
+            forces[i] -= force
+            forces[j] += force
+    
     return forces
 
-def velocity_verlet(positions, velocities, forces, dt, mass):
-    #Update velocities and positions
-    velocities += 0.5 * forces / mass * dt
-    positions += velocities * dt
-    positions = apply_pbc(positions, box_size) #boundary conditions
 
-    #New forces and velocities from updated positions
+# Compute potential energy
+def compute_potential_energy(positions, k, r0, epsilon_repulsive, epsilon_attractive, sigma, box_size):
+    
+    n_particles = positions.shape[0]
+    
+    # Harmonic potential energy
+    harmonic_energy = 0.0
+    for i in range(n_particles - 1):
+        displacement = positions[i + 1] - positions[i]
+        displacement = minimum_image(displacement, box_size)
+        distance = np.linalg.norm(displacement)
+        harmonic_energy += 0.5 * k * (distance - r0)**2
+
+    # Lennard-Jones potential energy
+    lj_energy = 0.0
+    cutoff = 2**(1/6) * sigma
+    for i in range(n_particles):
+        for j in range(i + 1, n_particles):
+            
+            displacement = positions[j] - positions[i]
+            displacement = minimum_image(displacement, box_size)
+            distance = np.linalg.norm(displacement)
+            
+            if distance >= cutoff:
+                continue
+            
+            # Repulsive or attractive interaction
+            if abs(i - j) == 2:  # Repulsive
+                epsilon = epsilon_repulsive
+            elif abs(i - j) > 2:  # Attractive
+                epsilon = epsilon_attractive
+            else:
+                continue
+            
+            lj_factor = (sigma / distance)
+            lj_energy += 4 * epsilon * ((lj_factor**12) - (lj_factor**6))
+
+    return harmonic_energy + lj_energy # Return total potential energy
+
+
+# Velocity Verlet Integration
+def velocity_verlet(positions, velocities, forces, dt, mass):
+    velocities += 0.5 * forces / mass * dt # Update velocities
+    positions += velocities * dt # Update positions
+    positions = apply_pbc(positions, box_size) # Apply periodic boundary conditions
+
+    # Compute new foreces
     forces_harmonic = compute_harmonic_forces(positions, k, r0, box_size)
     forces_repulsive = compute_lennard_jones_forces(positions, epsilon_repulsive, sigma, box_size, 'repulsive')
     forces_attractive = compute_lennard_jones_forces(positions, epsilon_attractive, sigma, box_size, 'attractive')
     forces_new = forces_harmonic + forces_repulsive + forces_attractive
-    velocities += 0.5 * forces_new / mass * dt
+
+    velocities += 0.5 * forces_new / mass *dt
+    
     return positions, velocities, forces_new
 
+# Velocity Rescaling Thermostat
 def rescale_velocities(velocities, target_temperature, mass):
-    kinetic_energy = 0.5 * mass * np.sum(np.linalg.norm(velocities, axis=1)**2)
-    current_temperature = (2 / 3) * kinetic_energy / (n_particles * k_B) #calculate current temp from KE
+    # Compute the kinetic energy
+    kinetic_energy = 0.5 * mass * np.sum(np.linalg.norm(velocities, axis = 1)**2)
+    # Calculate the current temperature
+    n_particles = velocities.shape[0]
+    current_temperature = (2/3) * kinetic_energy / (n_particles *k_B)
+
+    # Determine the scaling factor
     scaling_factor = np.sqrt(target_temperature / current_temperature)
-    velocities *= scaling_factor #scales currect velocity based on target and current temps
+    # Rescale the velocities
+    velocities *= scaling_factor
+   
     return velocities
 
-
-
-
-#Example Simulation
-
-# Initialize positions and velocities
-positions = initialize_chain(n_particles, box_size, r0)
-velocities = initialize_velocities(n_particles, target_temperature, mass)
-
-# Simulation loop
-for step in range(total_steps):
-    # Compute forces
-    forces_harmonic = compute_harmonic_forces(positions, k, r0, box_size)
-    forces_repulsive = compute_lennard_jones_forces(positions, epsilon_repulsive, sigma, box_size, 'repulsive')
-    forces_attractive = compute_lennard_jones_forces(positions, epsilon_attractive, sigma, box_size, 'attractive')
-    total_forces = forces_harmonic + forces_repulsive + forces_attractive
-    
-    # Integrate equations of motion
-    positions, velocities, total_forces = velocity_verlet(positions, velocities, total_forces, dt, mass)
-    
-    # Apply thermostat
-    if step % rescale_interval == 0:
-        velocities = rescale_velocities(velocities, target_temperature, mass)
-
-# Store data for analysis
-    if step % 100 == 0:  # Store every 100 steps
-        position_trajectory.append(positions.copy())  # Store a copy of the positions
-        velocity_trajectory.append(velocities.copy())  # Store a copy of the velocities
-        forces_trajectory.append(total_forces.copy())  # Store a copy of total forces
-
-
-#Analysis
-
+# Calculate Radius of Gyration
 def calculate_radius_of_gyration(positions):
     center_of_mass = np.mean(positions, axis = 0)
-    Rg_squared = np.mean(sum((positions - center_of_mass)^2, axis = 1))
+    Rg_squared = np.mean(np.sum((positions - center_of_mass)**2, axis = 1))
     Rg = np.sqrt(Rg_squared)
-    
     return Rg
 
+# Calculate End-to-End Distance
 def calculate_end_to_end_distance(positions):
-    Ree = np.linalg.norm(positions[-1] - posiions[0])
-    
+    Ree = np.linalg.norm(positions[-1]-positions[0])
     return Ree
-
-
-#Example Analysis
-
-# Arrays to store properties
-temperatures = np.linspace(0.1, 1.0, 10)
-Rg_values = []
-Ree_values = []
-potential_energies = []
-
-for T in temperatures:
-    # Set target temperature
-    target_temperature = T
-    # (Re-initialize positions and velocities)
-    # (Run simulation)
-    # Compute properties
-    Rg = calculate_radius_of_gyration(positions)
-    Ree = calculate_end_to_end_distance(positions)
-    Rg_values.append(Rg)
-    Ree_values.append(Ree)
-    potential_energies.append(np.mean(potential_energy_array))
-
-# Plotting
-plt.figure()
-plt.plot(temperatures, Rg_values, label='Radius of Gyration')
-plt.xlabel('Temperature')
-plt.ylabel('Radius of Gyration')
-plt.title('Radius of Gyration vs Temperature')
-plt.legend()
-plt.show()
-
-plt.figure()
-plt.plot(temperatures, Ree_values, label='End-to-End Distance')
-plt.xlabel('Temperature')
-plt.ylabel('End-to-End Distance')
-plt.title('End-to-End Distance vs Temperature')
-plt.legend()
-plt.show()
-
-plt.figure()
-plt.plot(temperatures, potential_energies, label='Potential Energy')
-plt.xlabel('Temperature')
-plt.ylabel('Potential Energy')
-plt.title('Potential Energy vs Temperature')
-plt.legend()
-plt.show()
